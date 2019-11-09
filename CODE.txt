@@ -1,0 +1,283 @@
+using CredalisFactory;
+using CredalisInterface;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace CredalisClient
+{
+    public partial class FrmListeComptabilisation : DevExpress.XtraEditors.XtraForm
+    {
+        List<string> m_ListChampsPrincipals;
+        List<DossierAComptabilise> listeDossier = new List<DossierAComptabilise>();
+        List<Dossier> dossiersComptables = new List<Dossier>();
+        List<Dossier> echeancesComptables = new List<Dossier>();
+        DateTime dateArret = DateTime.Now;
+        public FrmListeComptabilisation()
+        {
+            InitializeComponent();
+            GestionChamps_DossierOuEcheance();
+        }
+
+        public FrmListeComptabilisation(DateTime dtDateDarrete)
+        {
+            InitializeComponent();
+            rgSelection.SelectedIndex = 0;//Tous
+            dateArret = dtDateDarrete;
+            LoadData();
+            GestionChamps_DossierOuEcheance();
+            m_ListChampsPrincipals = new List<string>() { rgSelection.Name };
+        }
+
+        public void LoadData()
+        {
+            try
+            {
+                bsComptabiliser.Clear();
+                var itf = Factory.GetComptabilisationImpl(Outils.GetConnectionString(), Outils.CurrentSociete.ConnexionBase);
+                dossiersComptables = itf.GetDossiers_Comptables(Outils.CurrentSociete.Cle, dateArret);
+                echeancesComptables = itf.GetEcheances_Comptabiles(Outils.CurrentSociete.Cle, dateArret);
+
+                listeDossier = GetListDossierAComptabiliser().ToList();
+                bsComptabiliser.DataSource = listeDossier;
+            }
+            catch (Exception ex)
+            {
+                Outils.MsgErreur(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Get Total pour chaque Dossier ou Echéance
+        /// </summary>
+        private void gdComptabiliser_CustomUnboundColumnData(object sender, DevExpress.XtraGrid.Views.Base.CustomColumnDataEventArgs e)
+        {
+        }
+
+        private void GestionChamps_DossierOuEcheance()
+        {
+            bsComptabiliser.EndEdit();
+
+            if (!Outils.IsNull(rgSelection.EditValue))
+            {
+                char type = (char)rgSelection.EditValue;
+                if (type == 'D') // Dossier
+                {
+                    colDateFin.VisibleIndex = 6;
+                    colCapital.VisibleIndex = 7;
+                    colFraisHT.VisibleIndex = 8;
+
+
+                    //visibilité dans la collonne Dossier
+                    colDateFin.Visible = false;
+                    colInterets.Visible = false;
+                    colLoyerHT.Visible = false;
+                    colAssuranceHT.Visible = false;
+                }
+                else if (type == 'E')
+                {
+                    colDateFin.VisibleIndex = 6;
+                    colCapital.VisibleIndex = 7;
+                    colInterets.VisibleIndex = 8;
+                    colLoyerHT.VisibleIndex = 9;
+                    colFraisHT.VisibleIndex = 10;
+                    colAssuranceHT.VisibleIndex = 11;
+                }
+            }
+
+        }
+
+        private void FrmListeComptabilisation_Load(object sender, EventArgs e)
+        {
+            new ApparenceControls(this.Controls, m_ListChampsPrincipals);
+        }
+
+        protected override DevExpress.Skins.XtraForm.FormPainter CreateFormBorderPainter()
+        {
+            return new CustomFormPainter(this, LookAndFeel, false, false, "#F2F2F2");
+        }
+
+
+        private void btAnnuler_Click(object sender, EventArgs e)
+        {
+            this.Close();
+        }
+        private void btExportXLS_Click(object sender, EventArgs e)
+        {
+            using (SaveFileDialog saveDialog = new SaveFileDialog())
+            {
+                saveDialog.Filter = "Excel (2013) (.xls)|*.xls";
+                if (saveDialog.ShowDialog() != DialogResult.Cancel)
+                {
+                    string exportFilePath = saveDialog.FileName;
+                    string fileExtenstion = new FileInfo(exportFilePath).Extension;
+
+                    switch (fileExtenstion)
+                    {
+                        case ".xls":
+                            gdComptabiliser.ExportToXls(exportFilePath);
+                            break;
+                        default:
+                            break;
+                    }
+                    if (File.Exists(exportFilePath))
+                    {
+                        try
+                        {
+                            //Essayez d'ouvrir le fichier et laissez Windows décider comment l'ouvrir.
+                            System.Diagnostics.Process.Start(exportFilePath);
+                        }
+                        catch
+                        {
+                            String msg = "Le fichier n'a pas pu être ouvert." + Environment.NewLine + Environment.NewLine + "Path: " + exportFilePath;
+                            MessageBox.Show(msg, "Error!", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    else
+                    {
+                        String msg = "Le fichier n'a pas pu être ouvert." + Environment.NewLine + Environment.NewLine + "Path: " + exportFilePath;
+                        MessageBox.Show(msg, "Error!", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        private void rgSelection_EditValueChanged(object sender, EventArgs e)
+        {
+            GestionChamps_DossierOuEcheance();
+        }
+
+        private void btOK_Click(object sender, EventArgs e)
+        {
+            dossiersComptables = GetListDossiers();
+            echeancesComptables = GetListEcheances();
+
+            IComptabilisation itf = Factory.GetComptabilisationImpl(Outils.GetConnectionString(), Outils.CurrentSociete.ConnexionBase);
+            string result = itf.Comptabilisation(dateArret, Outils.CurrentSociete.Cle, Outils.CurrentSociete.Lien, dossiersComptables, echeancesComptables);
+            Outils.MsgInformation(result);
+        }
+
+        public List<Dossier> GetListDossiers()
+        {
+            var listeDossierFiltre = listeDossier.Where(c­­ => c.TypeDoc == "Dossier" && c.Selection == true).ToList();
+          
+            List<Dossier> ListDossierFinale = new List<Dossier>();
+            foreach (var doc in listeDossierFiltre)
+            {
+                IComptabilisation itf = Factory.GetComptabilisationImpl(Outils.GetConnectionString(), Outils.CurrentSociete.ConnexionBase);
+                dossiersComptables = itf.GetDossiers_Com­­ptables(Outils.Curr­e­ntSociete.Cle, dateArret);
+
+                foreach (var dossier in dossiersComptables)
+                {
+                    if (dossier.Cle == doc.CleDossier)
+                    {
+                        ListDossierFinale.Ad­­d(dossier);
+
+                    }
+                }
+            }
+            return ListDossierFinale.To­­List();
+        }
+
+        public List<Dossier> GetListEcheances()
+        {
+            var listeEcheanceFiltre = listeDossier.Where(c­­ => c.TypeDoc == "Echeance" && c.Selection == true).ToList();
+
+            List<Dossier> ListEcheanceFinale = new List<Dossier>();
+            foreach (var doc in listeEcheanceFiltre)
+            {
+                IComptabilisation itf = Factory.GetComptabilisationImpl(Outils.GetConnectionString(), Outils.CurrentSociete.ConnexionBase);
+                echeancesComptables = itf.GetEcheances_Comptabiles(Outils.Curr­e­ntSociete.Cle, dateArret);
+
+                foreach (var dossier in echeancesComptables)
+                {
+                    if (dossier.Cle == doc.CleDossier)
+                    {
+                        ListEcheanceFinale.Ad­­d(dossier);
+                        foreach(var echeance in dossier.Echeances)
+                        {
+                            if(echeance.Cle == doc.CleEcheance)
+                            {
+                                dossier.Echeances.Add(echeance);
+                            }
+                        }
+
+                    }
+                }
+            }
+            return ListEcheanceFinale.To­­List();
+        }
+
+        public List<DossierAComptabilise> GetListDossierAComptabiliser()
+        {
+            List<DossierAComptabilise> lst = new List<DossierAComptabilise>();            
+            dossiersComptables.ForEach(dc =>
+                lst.Add(new DossierAComptabilise
+                {
+                    CleDossier = dc.Cle.GetValueOrDefault(),
+                    CleEcheance = 0,
+                    Selection = true,
+                    TypeDoc = "Dossier",
+                    Reference = dc.Reference,
+                    Banque = dc.BanqueIntitule,
+                    Financeur = dc.FinanceurIntitule,
+                    Debut = dc.Date_Creation,
+                    Capital = dc.Capital,
+                    Interets = 0,
+                    Loyer = 0,
+                    Frais = dc.Frais_Dossier,
+                    Assurance = 0,
+                    Total = dc.Capital + dc.Frais_Dossier
+                })
+            );            
+            foreach (Dossier de in echeancesComptables)
+            {
+                de.Echeances.ForEach(e =>
+                    lst.Add(new DossierAComptabilise
+                    {
+                        CleDossier = de.Cle.GetValueOrDefault(),
+                        CleEcheance = e.Cle,
+                        Selection = true,
+                        TypeDoc = "Echeance",
+                        Reference = de.Reference,
+                        Banque = de.BanqueIntitule,
+                        Financeur = de.FinanceurIntitule,
+                        Debut = e.Debut_Echeance,
+                        Fin = e.Fin_Echeance,
+                        Capital = e.Capital == null ? 0 : e.Capital,
+                        Interets = e.Interet == null ? 0 : e.Interet,
+                        Loyer = e.LoyerHT,
+                        Frais = e.FraisHT,
+                        Assurance = e.AssuranceHT,
+                        Total = de.Financement_Location == 'F' ? e.Capital + e.Interet + e.FraisHT + e.AssuranceHT : e.LoyerHT + e.FraisHT + e.AssuranceHT + e.Tva_Loyer_Montant + e.Tva_Frais_Montant + e.Tva_Assurance_Montant
+                    })  
+                    );
+            }
+            return lst;
+        }
+
+        
+        private void rgSelection_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (rgSelection.SelectedIndex == 0) //Tous
+            {
+                bsComptabiliser.DataSource = listeDossier;
+            }
+            else if (rgSelection.SelectedIndex == 1) //N'affiche que la liste des Dossiers
+            {
+                bsComptabiliser.DataSource = listeDossier.Where(c => c.TypeDoc == "Dossier").ToList();
+            }
+            else //N'affiche que la liste des Echeances
+            {
+                bsComptabiliser.DataSource = listeDossier.Where(c => c.TypeDoc == "Echeance").ToList();
+            }
+        }
+    }
+}
